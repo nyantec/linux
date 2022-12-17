@@ -1597,6 +1597,15 @@ config MACHZ_WDT
 	  To compile this driver as a module, choose M here: the
 	  module will be called machzwd.
 
+config MCOM_FPGA_WATCHDOG
+	tristate "Siemens MCOM FPGA Watchdog"
+	#depends on X86 && I2C # TODO: enable only on X86
+	depends on RUST
+	help
+		Say Y here to include support for the Siemens MCOM FPGA Watchdog.
+
+		This driver can also be built as a module.
+
 config SBC_EPX_C3_WATCHDOG
 	tristate "Winsystems SBC EPX-C3 watchdog"
 	depends on X86
