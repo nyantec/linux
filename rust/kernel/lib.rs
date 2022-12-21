@@ -65,6 +65,9 @@ pub mod mm;
 pub mod net;
 pub mod pages;
 pub mod power;
+#[cfg(any(CONFIG_PROC_FS, doc))]
+#[doc(cfg(CONFIG_PROC_FS))]
+pub mod proc;
 pub mod revocable;
 pub mod security;
 pub mod str;
