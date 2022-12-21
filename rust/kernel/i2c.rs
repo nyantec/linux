@@ -8,7 +8,7 @@ use crate::{
     bindings,
     device::RawDevice,
     driver,
-    error::{from_kernel_result, Result},
+    error::{code, from_kernel_result, Result},
     str::{BStr, CStr},
     to_result,
     types::PointerWrapper,
@@ -204,6 +204,55 @@ impl Client {
         // INVARIANT: The safety requirements of the function ensure the lifetime invariant.
         Self { ptr }
     }
+
+    /// Get Chip address.
+    pub fn get_addr(&self) -> u16 {
+        // SAFETY: By the type invariants, we know that `self.ptr` is non-null and valid.
+        unsafe { (*self.ptr).addr }
+    }
+
+    /// Send data to I2C client.
+    ///
+    /// The master routines are the ones normally used to transmit data to devices
+    /// on a bus (or read from them). Apart from two basic transfer functions to
+    /// transmit one message at a time, a more complex version can be used to
+    /// transmit an arbitrary number of messages without interruption.
+    ///
+    /// Buf must be smaller than 64k.
+    pub fn transfer_buffer_flags(&self, buf: &mut [u8], flags: u16) -> Result<usize> {
+        // SAFETY: buf is valid
+        unsafe { self.transfer_buffer_flags_ptr(buf.as_mut_ptr(), buf.len(), flags) }
+    }
+
+    unsafe fn transfer_buffer_flags_ptr(
+        &self,
+        buf: *mut u8,
+        count: usize,
+        flags: u16,
+    ) -> Result<usize> {
+        if count > u16::MAX as usize || count == 0 {
+            return Err(code::EINVAL);
+        }
+
+        // SAFETY: By the type invariants, we know that `self.ptr` is non-null and valid.
+        // SAFETY: `buf` is valid and non-null.
+        let count =
+            unsafe { bindings::i2c_transfer_buffer_flags(self.ptr, buf as _, count as _, flags) };
+        to_result(count)?;
+        Ok(count as _)
+    }
+
+    /// Issue a single I2C message in master transmit mode.
+    pub fn master_send(&mut self, buf: &[u8]) -> Result<usize> {
+        // SAFETY: buf is valid
+        // SAFETY: buf is only read. transfer will not write, when flag RD is not set.
+        unsafe { self.transfer_buffer_flags_ptr(buf.as_ptr() as _, buf.len(), 0) }
+    }
+
+    /// Issue a single I2C message in master receive mode.
+    pub fn master_recv(&mut self, buf: &mut [u8]) -> Result<usize> {
+        self.transfer_buffer_flags(buf, msg_flags::RD)
+    }
 }
 
 // SAFETY: The device returned by `raw_device` is the raw i2c device.
@@ -243,4 +292,25 @@ macro_rules! module_i2c_driver {
     ($($f:tt)*) => {
         $crate::module_driver!(<T>, $crate::i2c::Adapter<T>, { $($f)* });
     };
+}
+
+/// I2C Message flags.
+pub mod msg_flags {
+    pub const RD: u16 = bindings::I2C_M_RD as _;
+
+    pub const TEN: u16 = bindings::I2C_M_TEN as _;
+
+    pub const DMA_SAFE: u16 = bindings::I2C_M_DMA_SAFE as _;
+
+    pub const RECV_LEN: u16 = bindings::I2C_M_RECV_LEN as _;
+
+    pub const NO_RD_ACK: u16 = bindings::I2C_M_NO_RD_ACK as _;
+
+    pub const IGNORE_NAK: u16 = bindings::I2C_M_IGNORE_NAK as _;
+
+    pub const REV_DIR_ADDR: u16 = bindings::I2C_M_REV_DIR_ADDR as _;
+
+    pub const NOSTART: u16 = bindings::I2C_M_NOSTART as _;
+
+    pub const STOP: u16 = bindings::I2C_M_STOP as _;
 }
