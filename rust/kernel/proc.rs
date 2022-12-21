@@ -4,6 +4,7 @@
 //!
 //! C header: [`include/linux/proc_fs.h`](../../../../include/linux/proc_fs.h)
 
+use alloc::boxed::Box;
 use core::{marker, mem, ptr};
 
 use crate::{
@@ -15,7 +16,7 @@ use crate::{
     mm,
     str::CStr,
     types::{Mode, PointerWrapper},
-    user_ptr::{UserSlicePtr, UserSlicePtrReader, UserSlicePtrWriter},
+    user_ptr::UserSlicePtr,
 };
 use macros::vtable;
 
@@ -24,42 +25,35 @@ use macros::vtable;
 /// # Invariants
 ///
 /// The field `ptr` is valid for the lifetime of the object.
-pub struct ProcDirEntry {
+pub struct ProcDirEntry<T = ()> {
     ptr: core::ptr::NonNull<bindings::proc_dir_entry>, //*mut bindings::proc_dir_entry;
+    marker: marker::PhantomData<T>,
 }
 
 // SAFETY: `ProcDirEntry` only holds a pointer to a C device, which is safe to be used from any thread.
-unsafe impl Send for ProcDirEntry {}
+unsafe impl<T: Send> Send for ProcDirEntry<T> {}
 
 // SAFETY: `ProcDirEntry` only holds a pointer to a C device, references to which are safe to be used
 // from any thread.
-unsafe impl Sync for ProcDirEntry {}
+unsafe impl<T: Sync> Sync for ProcDirEntry<T> {}
 
 impl ProcDirEntry {
-    /// Create a new directory in procfs.
-    pub fn mkdir(name: &CStr, parent: Option<&Self>) -> Result<Self> {
-        let parent_ptr = if let Some(parent) = parent {
+    fn parent_ptr(parent: Option<&ProcDirEntry>) -> *mut bindings::proc_dir_entry {
+        if let Some(parent) = parent {
             parent.ptr.as_ptr()
         } else {
-            core::ptr::null_mut()
-        };
+            ptr::null_mut()
+        }
+    }
 
-        // SAFETY: name is valid an non-null
-        // SAFETY: parent_ptr is valid
-        let ptr = unsafe { bindings::proc_mkdir(name.as_char_ptr(), parent_ptr) };
-
-        Ok(Self {
-            ptr: core::ptr::NonNull::new(ptr).ok_or(code::ENOMEM)?,
-        })
+    /// Create a new directory in procfs.
+    pub fn mkdir(name: &CStr, parent: Option<&ProcDirEntry>) -> Result<Self> {
+        Self::mkdir_mode(name, parent, Mode::from_int(0))
     }
 
     /// Create a new directory in procfs with mode.
-    pub fn mkdir_mode(name: &CStr, parent: Option<&Self>, mode: Mode) -> Result<Self> {
-        let parent_ptr = if let Some(parent) = parent {
-            parent.ptr.as_ptr()
-        } else {
-            core::ptr::null_mut()
-        };
+    pub fn mkdir_mode(name: &CStr, parent: Option<&ProcDirEntry>, mode: Mode) -> Result<Self> {
+        let parent_ptr = ProcDirEntry::parent_ptr(parent);
 
         // SAFETY: name is valid an non-null
         // SAFETY: parent_ptr is valid
@@ -68,11 +62,54 @@ impl ProcDirEntry {
 
         Ok(Self {
             ptr: core::ptr::NonNull::new(ptr).ok_or(code::ENOMEM)?,
+            marker: marker::PhantomData,
         })
     }
 }
 
-impl Drop for ProcDirEntry {
+impl<T: Operations> ProcDirEntry<T> {
+    /// Generate a new proc file entry with given data.
+    pub fn new(
+        name: &CStr,
+        mode: Mode,
+        parent: Option<&ProcDirEntry>,
+        data: Box<T::OpenData>,
+    ) -> Result<Self> {
+        // SAFETY: the adapter is compatible with ProcDirEntry
+        let proc_ops = unsafe { OperationsVtable::<Self, T>::build() };
+
+        let parent_ptr = ProcDirEntry::parent_ptr(parent);
+
+        // SAFETY: name is valid an non-null
+        // SAFETY: parent_ptr is valid
+        // SAFETY: proc_ops is valid
+        let ptr = unsafe {
+            bindings::proc_create_data(
+                name.as_char_ptr(),
+                mode.as_int(),
+                parent_ptr,
+                proc_ops,
+                Box::into_raw(data) as _,
+            )
+        };
+
+        Ok(Self {
+            ptr: core::ptr::NonNull::new(ptr).ok_or(code::ENOMEM)?,
+            marker: marker::PhantomData,
+        })
+    }
+}
+
+impl<T: Operations> OpenAdapter<T::OpenData> for ProcDirEntry<T> {
+    unsafe fn convert(
+        _inode: *mut bindings::inode,
+        file: *mut bindings::file,
+    ) -> *const T::OpenData {
+        (unsafe { (*file).private_data }) as _
+    }
+}
+
+impl<T> Drop for ProcDirEntry<T> {
     fn drop(&mut self) {
         // SAFETY: `ptr` is valid by type invariants.
         unsafe {
