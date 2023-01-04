@@ -30,6 +30,17 @@ config SAMPLE_RUST_PRINT
 
 	  If unsure, say N.
 
+config SAMPLE_RUST_PROC_FS
+	tristate "Proc FS test"
+	depends on PROC_FS
+	help
+	  This option builds the Rust proc fs sample.
+
+	  To compile this as a module, choose M here:
+	  the module will be called rust_procfs.
+
+	  If unsure, say N.
+
 config SAMPLE_RUST_MODULE_PARAMETERS
 	tristate "Module parameters"
 	help
