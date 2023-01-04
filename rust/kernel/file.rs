@@ -240,7 +240,7 @@ impl PollTable {
     /// # Safety
     ///
     /// The pointer `ptr` must be either null or a valid pointer for the lifetime of the object.
-    unsafe fn from_ptr(ptr: *mut bindings::poll_table_struct) -> Self {
+    pub(crate) unsafe fn from_ptr(ptr: *mut bindings::poll_table_struct) -> Self {
         Self { ptr }
     }
 
@@ -702,7 +702,7 @@ pub struct IoctlCommand {
 
 impl IoctlCommand {
     /// Constructs a new [`IoctlCommand`].
-    fn new(cmd: u32, arg: usize) -> Self {
+    pub(crate) fn new(cmd: u32, arg: usize) -> Self {
         let size = (cmd >> bindings::_IOC_SIZESHIFT) & bindings::_IOC_SIZEMASK;
 
         // SAFETY: We only create one instance of the user slice per ioctl call, so TOCTOU issues
