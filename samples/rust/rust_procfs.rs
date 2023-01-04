@@ -24,7 +24,7 @@ struct RustProcFS {
 
 impl kernel::Module for RustProcFS {
     fn init(name: &'static CStr, _module: &'static ThisModule) -> Result<Self> {
-        let root_name = CString::try_from_fmt(fmt!("samples/{}", name))?;
+        let root_name = CString::try_from_fmt(fmt!("driver/{}", name))?;
         let root = ProcDirEntry::mkdir(&root_name, None)?;
 
         let file_name = CString::try_from_fmt(fmt!("test"))?;

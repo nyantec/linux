@@ -38,6 +38,7 @@ unsafe impl<T: Send> Send for ProcDirEntry<T> {}
 unsafe impl<T: Sync> Sync for ProcDirEntry<T> {}
 
 impl ProcDirEntry {
+    /// Get a pointer to the parent proc dir entry or null.
     fn parent_ptr(parent: Option<&ProcDirEntry>) -> *mut bindings::proc_dir_entry {
         if let Some(parent) = parent {
             parent.ptr.as_ptr()
