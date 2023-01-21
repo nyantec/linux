@@ -8,7 +8,7 @@
 use crate::{clk::Clk, error::from_kernel_err_ptr};
 
 use crate::{
-    bindings,
+    bindings, error,
     revocable::{Revocable, RevocableGuard},
     str::CStr,
     sync::{LockClassKey, NeedsLockClass, RevocableMutex, RevocableMutexGuard, UniqueArc},
@@ -310,6 +310,106 @@ impl<T, U, V> Deref for Data<T, U, V> {
 impl<T, U, V> DerefMut for Data<T, U, V> {
     fn deref_mut(&mut self) -> &mut V {
         &mut self.general
+    }
+}
+
+/// Represents a Device Attribute for SysFS.
+///
+/// Generates a [`device_attribute`] struct on the C side.
+#[cfg(any(CONFIG_SYSFS, doc))]
+#[doc(cfg(CONFIG_SYSFS))]
+#[macros::vtable]
+pub trait DeviceAttribute {
+    /// File mode of the sysfs file.
+    const MODE: crate::Mode = crate::Mode::from_int(0);
+    /// FIle name of the sysfs file.
+    const NAME: &'static CStr;
+
+    /// Callback to show the value of the sysfs file.
+    fn show(device: &Device, _writer: &mut impl crate::io_buffer::IoBufferWriter) -> Result<isize> {
+        Err(error::code::EIO)
+    }
+
+    /// Callback to store the value of the sysfs file.
+    fn store(device: &Device, reader: &mut impl crate::io_buffer::IoBufferReader) -> Result<isize> {
+        Err(error::code::EIO)
+    }
+}
+
+#[cfg(any(CONFIG_SYSFS, doc))]
+#[doc(cfg(CONFIG_SYSFS))]
+struct DeviceAttributeVTable<DA: DeviceAttribute>(core::marker::PhantomData<DA>);
+
+#[cfg(any(CONFIG_SYSFS, doc))]
+#[doc(cfg(CONFIG_SYSFS))]
+impl<DA: DeviceAttribute> DeviceAttributeVTable<DA> {
+    unsafe extern "C" fn show_callback(
+        device: *mut bindings::device,
+        attr: *mut bindings::device_attribute,
+        buf: *mut core::ffi::c_char,
+    ) -> core::ffi::c_ssize_t {
+        error::from_kernel_result! {
+            // SAFETY: The caller guarantees that the device pointer is valid.
+            let dev = unsafe { Device::new(device) };
+            // SAFETY: The caller guarantees that the buffer pointer is valid.
+            let mut buf = unsafe { crate::user_ptr::UserSlicePtr::new(buf as _, bindings::BINDINGS_PAGE_SIZE).writer() };
+
+            DA::show(&dev, &mut buf)
+        }
+    }
+
+    unsafe extern "C" fn store_callback(
+        device: *mut bindings::device,
+        attr: *mut bindings::device_attribute,
+        buf: *const core::ffi::c_char,
+        count: core::ffi::c_size_t,
+    ) -> core::ffi::c_ssize_t {
+        error::from_kernel_result! {
+            // SAFETY: The caller guarantees that the device pointer is valid.
+            let dev = unsafe { Device::new(device) };
+            // SAFETY: The caller guarantees that the buffer pointer is valid for count.
+            let mut buf = unsafe { crate::user_ptr::UserSlicePtr::new(buf as _, count as _).reader() };
+
+            DA::store(&dev, &mut buf)
+        }
+    }
+
+    const ATTR: bindings::device_attribute = bindings::device_attribute {
+        attr: bindings::attribute {
+            name: DA::NAME.as_char_ptr(),
+            mode: DA::MODE.as_int(),
+        },
+        show: if DA::HAS_SHOW {
+            Some(Self::show_callback)
+        } else {
+            None
+        },
+        store: if DA::HAS_STORE {
+            Some(Self::store_callback)
+        } else {
+            None
+        },
+    };
+}
+
+#[cfg(any(CONFIG_SYSFS, doc))]
+#[doc(cfg(CONFIG_SYSFS))]
+impl Device {
+    /// Create a new file in sysfs for this device.
+    pub fn create_file<DA: DeviceAttribute>(&self, attribute: DA) -> Result {
+        let vtable = DeviceAttributeVTable::<DA>::ATTR;
+
+        // SAFETY: Self is valid by invariant.
+        let err = unsafe { bindings::device_create_file(self.ptr, &vtable) };
+        error::to_result(err)
+    }
+
+    /// Remove file from sysfs for this device.
+    pub fn remove_file<DA: DeviceAttribute>(&self, attribute: DA) {
+        let vtable = DeviceAttributeVTable::<DA>::ATTR;
+
+        // SAFETY: Self is valid by invariant.
+        unsafe { bindings::device_remove_file(self.ptr, &vtable) };
     }
 }
 
