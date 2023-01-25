@@ -1666,6 +1666,15 @@ config SIEMENS_SIMATIC_IPC_WDT
 	  To compile this driver as a module, choose M here: the module will be
 	  called simatic-ipc-wdt.
 
+config SIEMENS_MCOM_FPGA
+	tristate "Siemens MCOM FPGA Watchdog"
+	#depends on X86
+	select WATCHDOG_CORE
+	select I2C
+	help
+	  This enables the FPGA I2C Driver from Siemens Mobility GmbH
+
+
 # M68K Architecture
 
 config M54xx_WATCHDOG
